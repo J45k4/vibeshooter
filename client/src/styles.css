@@ -1,0 +1,145 @@
+:root {
+  color-scheme: dark;
+  font-family: "Space Grotesk", "Avenir Next", sans-serif;
+  background: radial-gradient(circle at top, #223147 0%, #10151d 55%, #090c11 100%);
+  color: #e9edf3;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background:
+    radial-gradient(circle at 20% 10%, rgba(120, 150, 200, 0.12), transparent 30%),
+    radial-gradient(circle at 80% 20%, rgba(248, 181, 95, 0.1), transparent 22%),
+    #090c11;
+}
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hud-panel {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  padding: 12px 14px;
+  min-width: 180px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(11, 15, 22, 0.65);
+  backdrop-filter: blur(12px);
+}
+
+.hud-label {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8ea2bd;
+}
+
+.hud-value {
+  margin-top: 4px;
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.hud-meta {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #c5cfdd;
+}
+
+.crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+
+.crosshair::before,
+.crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 999px;
+}
+
+.crosshair::before {
+  width: 2px;
+  height: 24px;
+  left: 11px;
+  top: 0;
+}
+
+.crosshair::after {
+  width: 24px;
+  height: 2px;
+  left: 0;
+  top: 11px;
+}
+
+.status-card {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  width: min(320px, calc(100vw - 36px));
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(11, 15, 22, 0.7);
+  backdrop-filter: blur(12px);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.status-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8ea2bd;
+}
+
+.status-copy {
+  margin-top: 6px;
+  color: #d2dae6;
+}
+
+.status-copy strong {
+  color: #ffffff;
+}
+
+.status-copy.is-alert {
+  color: #ffc9ad;
+}
+
+.canvas-shell {
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 700px) {
+  .hud-panel,
+  .status-card {
+    padding: 10px 12px;
+  }
+
+  .hud-value {
+    font-size: 24px;
+  }
+}
+
