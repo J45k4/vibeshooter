@@ -4,6 +4,7 @@ import * as THREE from "three";
 
 import type {
   ClientMessage,
+  ProjectileSnapshot,
   ServerMessage,
   SnapshotMessage,
   TargetSnapshot,
@@ -37,6 +38,8 @@ type TargetVisual = {
   root: THREE.Mesh;
   glow: THREE.Mesh;
 };
+
+type ProjectileVisual = THREE.Mesh;
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) {
@@ -121,6 +124,8 @@ for (const piece of arenaPieces) {
 
 const targetGroup = new THREE.Group();
 scene.add(targetGroup);
+const projectileGroup = new THREE.Group();
+scene.add(projectileGroup);
 
 const targetMaterial = new THREE.MeshStandardMaterial({
   color: 0xff6d4d,
@@ -135,6 +140,7 @@ const glowMaterial = new THREE.MeshBasicMaterial({
 });
 
 const targetVisuals = new Map<number, TargetVisual>();
+const projectileVisuals = new Map<number, ProjectileVisual>();
 for (let id = 1; id <= 5; id += 1) {
   const root = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.8, 0.7), targetMaterial.clone());
   root.castShadow = true;
@@ -304,6 +310,55 @@ function applyTargets(snapshot: SnapshotMessage | null, alpha: number): void {
   });
 }
 
+function applyProjectiles(snapshot: SnapshotMessage | null, alpha: number): void {
+  const previousProjectiles = new Map<number, ProjectileSnapshot>();
+  snapshotBuffer.previous?.projectiles.forEach((projectile) => {
+    previousProjectiles.set(projectile.id, projectile);
+  });
+
+  const activeIds = new Set<number>();
+  snapshot?.projectiles.forEach((projectile) => {
+    activeIds.add(projectile.id);
+
+    let mesh = projectileVisuals.get(projectile.id);
+    if (!mesh) {
+      mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 12, 12),
+        new THREE.MeshStandardMaterial({
+          color: 0xffd18a,
+          emissive: 0xf28345,
+          emissiveIntensity: 1.1,
+          roughness: 0.18,
+          metalness: 0.05,
+        }),
+      );
+      mesh.castShadow = true;
+      projectileGroup.add(mesh);
+      projectileVisuals.set(projectile.id, mesh);
+    }
+
+    const previous = previousProjectiles.get(projectile.id);
+    const source = previous?.position ?? projectile.position;
+    mesh.position.set(
+      THREE.MathUtils.lerp(source[0], projectile.position[0], alpha),
+      THREE.MathUtils.lerp(source[1], projectile.position[1], alpha),
+      THREE.MathUtils.lerp(source[2], projectile.position[2], alpha),
+    );
+    mesh.visible = true;
+  });
+
+  for (const [id, mesh] of projectileVisuals) {
+    if (activeIds.has(id)) {
+      continue;
+    }
+
+    projectileGroup.remove(mesh);
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    projectileVisuals.delete(id);
+  }
+}
+
 function sendInput(frameDt: number): void {
   if (!welcome || gameOver) {
     send({ type: "input", sequence: ++input.sequence, moveX: 0, moveZ: 0, jumpPressed: false, jumpHeld: false, firePressed: false, yaw: input.yaw, pitch: input.pitch, frameDt });
@@ -342,6 +397,7 @@ function animate(): void {
     );
     updateCameraFromSnapshot(snapshotBuffer.current);
     applyTargets(snapshotBuffer.current, alpha);
+    applyProjectiles(snapshotBuffer.current, alpha);
   }
 
   muzzleFlash.intensity = performance.now() < muzzleUntil ? 4.5 : 0;
@@ -419,6 +475,7 @@ renderer.domElement.addEventListener("click", async () => {
 window.addEventListener("mousedown", (event) => {
   if (event.button === 0 && document.pointerLockElement === renderer.domElement) {
     input.fireQueued = true;
+    muzzleUntil = performance.now() + 40;
   }
 });
 
@@ -434,4 +491,3 @@ window.addEventListener("mousemove", (event) => {
 handleResize();
 connect();
 animate();
-

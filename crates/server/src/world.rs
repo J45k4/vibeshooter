@@ -4,7 +4,9 @@ use rapier3d::{
     prelude::*,
 };
 
-use crate::protocol::{HitEvent, PlayerSnapshot, SnapshotMessage, TargetSnapshot};
+use crate::protocol::{
+    HitEvent, PlayerSnapshot, ProjectileSnapshot, SnapshotMessage, TargetSnapshot,
+};
 
 const ARENA_HALF_EXTENT: f32 = 20.0;
 const WALL_HALF_HEIGHT: f32 = 2.5;
@@ -14,7 +16,10 @@ const PLAYER_HALF_SEGMENT: f32 = 0.55;
 const PLAYER_SPEED: f32 = 8.0;
 const JUMP_SPEED: f32 = 5.2;
 const GRAVITY: f32 = -18.0;
-const FIRE_RANGE: f32 = 80.0;
+const PROJECTILE_SPEED: f32 = 48.0;
+const PROJECTILE_LIFETIME: f32 = 1.8;
+const PROJECTILE_SPAWN_OFFSET: f32 = 0.9;
+const PROJECTILE_RADIUS: f32 = 0.12;
 const RESPAWN_SECONDS: f32 = 1.5;
 const OUT_OF_BOUNDS_Y: f32 = -8.0;
 const PLAYER_START: Vector<Real> = vector![0.0, 1.6, 12.0];
@@ -27,9 +32,11 @@ pub struct GameWorld {
     character_controller: KinematicCharacterController,
     player: PlayerState,
     targets: Vec<TargetState>,
+    projectiles: Vec<ProjectileState>,
     score: u32,
     game_over: bool,
     fixed_dt: f32,
+    next_projectile_id: u32,
 }
 
 struct PlayerState {
@@ -52,6 +59,13 @@ struct TargetState {
     phase: f32,
     alive: bool,
     respawn_timer: f32,
+}
+
+struct ProjectileState {
+    id: u32,
+    position: Vector<Real>,
+    velocity: Vector<Real>,
+    ttl: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -86,9 +100,11 @@ impl GameWorld {
                 on_ground: false,
             },
             targets: Vec::new(),
+            projectiles: Vec::new(),
             score: 0,
             game_over: false,
             fixed_dt,
+            next_projectile_id: 1,
         };
 
         world.build_arena();
@@ -149,6 +165,7 @@ impl GameWorld {
         let new_translation = *body.translation() + effective.translation;
         if new_translation.y < OUT_OF_BOUNDS_Y {
             self.game_over = true;
+            self.projectiles.clear();
             return StepOutcome {
                 recent_hits: Vec::new(),
                 game_over_just_triggered: true,
@@ -169,14 +186,12 @@ impl GameWorld {
         );
         self.sync_queries();
 
-        let recent_hits = if input.fire_pressed {
-            self.fire_hitscan()
-        } else {
-            Vec::new()
-        };
+        if input.fire_pressed {
+            self.spawn_projectile();
+        }
 
         StepOutcome {
-            recent_hits,
+            recent_hits: self.step_projectiles(),
             game_over_just_triggered: false,
         }
     }
@@ -210,6 +225,14 @@ impl GameWorld {
                     }
                 })
                 .collect(),
+            projectiles: self
+                .projectiles
+                .iter()
+                .map(|projectile| ProjectileSnapshot {
+                    id: projectile.id,
+                    position: [projectile.position.x, projectile.position.y, projectile.position.z],
+                })
+                .collect(),
             score: self.score,
             recent_hits,
             game_over: self.game_over,
@@ -220,6 +243,7 @@ impl GameWorld {
         self.game_over = false;
         self.player.vertical_velocity = 0.0;
         self.player.on_ground = false;
+        self.projectiles.clear();
         self.rigid_body_set[self.player.body].set_position(
             Isometry::translation(PLAYER_START.x, PLAYER_START.y, PLAYER_START.z),
             true,
@@ -234,6 +258,8 @@ impl GameWorld {
         self.player.pitch = 0.0;
         self.player.vertical_velocity = 0.0;
         self.player.on_ground = false;
+        self.projectiles.clear();
+        self.next_projectile_id = 1;
         self.rigid_body_set[self.player.body].set_position(
             Isometry::translation(PLAYER_START.x, PLAYER_START.y, PLAYER_START.z),
             true,
@@ -251,7 +277,10 @@ impl GameWorld {
     }
 
     fn build_arena(&mut self) {
-        self.add_fixed_box(vector![0.0, -0.5, 0.0], vector![ARENA_HALF_EXTENT, 0.5, ARENA_HALF_EXTENT]);
+        self.add_fixed_box(
+            vector![0.0, -0.5, 0.0],
+            vector![ARENA_HALF_EXTENT, 0.5, ARENA_HALF_EXTENT],
+        );
         self.add_fixed_box(
             vector![0.0, WALL_HALF_HEIGHT, -ARENA_HALF_EXTENT],
             vector![ARENA_HALF_EXTENT, WALL_HALF_HEIGHT, WALL_THICKNESS],
@@ -360,36 +389,77 @@ impl GameWorld {
         vector![horizontal.x, 0.0, horizontal.z]
     }
 
-    fn fire_hitscan(&mut self) -> Vec<HitEvent> {
-        let origin = self.eye_position();
+    fn spawn_projectile(&mut self) {
         let direction = self.look_direction();
-        let ray = Ray::new(point![origin.x, origin.y, origin.z], direction);
-
-        let hit = self.query_pipeline.cast_ray_and_get_normal(
-            &self.rigid_body_set,
-            &self.collider_set,
-            &ray,
-            FIRE_RANGE,
-            true,
-            QueryFilter {
-                flags: QueryFilterFlags::EXCLUDE_SENSORS,
-                exclude_rigid_body: Some(self.player.body),
-                ..QueryFilter::default()
-            },
-        );
-
-        let Some((collider_handle, _)) = hit else {
-            return Vec::new();
+        let projectile = ProjectileState {
+            id: self.next_projectile_id,
+            position: self.eye_position() + direction * PROJECTILE_SPAWN_OFFSET,
+            velocity: direction * PROJECTILE_SPEED,
+            ttl: PROJECTILE_LIFETIME,
         };
+        self.next_projectile_id = self.next_projectile_id.saturating_add(1);
+        self.projectiles.push(projectile);
+    }
 
-        let Some(target_index) = self
-            .targets
-            .iter()
-            .position(|target| target.collider == collider_handle && target.alive)
-        else {
-            return Vec::new();
-        };
+    fn step_projectiles(&mut self) -> Vec<HitEvent> {
+        let mut recent_hits = Vec::new();
+        let mut remaining = Vec::with_capacity(self.projectiles.len());
 
+        let projectiles = std::mem::take(&mut self.projectiles);
+        for mut projectile in projectiles {
+            projectile.ttl -= self.fixed_dt;
+            if projectile.ttl <= 0.0 {
+                continue;
+            }
+
+            let start = projectile.position;
+            let step = projectile.velocity * self.fixed_dt;
+            let distance = step.norm();
+            if distance <= f32::EPSILON {
+                continue;
+            }
+
+            let direction = step / distance;
+            let ray = Ray::new(point![start.x, start.y, start.z], direction);
+            let hit = self.query_pipeline.cast_ray_and_get_normal(
+                &self.rigid_body_set,
+                &self.collider_set,
+                &ray,
+                distance + PROJECTILE_RADIUS,
+                true,
+                QueryFilter {
+                    flags: QueryFilterFlags::EXCLUDE_SENSORS,
+                    exclude_rigid_body: Some(self.player.body),
+                    ..QueryFilter::default()
+                },
+            );
+
+            let Some((collider_handle, _)) = hit else {
+                projectile.position += step;
+                remaining.push(projectile);
+                continue;
+            };
+
+            let Some(target_index) = self
+                .targets
+                .iter()
+                .position(|target| target.collider == collider_handle && target.alive)
+            else {
+                continue;
+            };
+
+            let target_id = self.hit_target(target_index);
+            recent_hits.push(HitEvent {
+                target_id,
+                score: self.score,
+            });
+        }
+
+        self.projectiles = remaining;
+        recent_hits
+    }
+
+    fn hit_target(&mut self, target_index: usize) -> u32 {
         let (target_id, body, base_position) = {
             let target = &mut self.targets[target_index];
             target.alive = false;
@@ -401,13 +471,9 @@ impl GameWorld {
             Isometry::translation(base_position.x, -50.0, base_position.z),
             true,
         );
-        self.sync_queries();
-
         self.score = self.score.saturating_add(1);
-        vec![HitEvent {
-            target_id,
-            score: self.score,
-        }]
+        self.sync_queries();
+        target_id
     }
 
     fn player_position(&self) -> Vector<Real> {
@@ -428,7 +494,8 @@ impl GameWorld {
     fn add_fixed_box(&mut self, position: Vector<Real>, half_extents: Vector<Real>) {
         let body = RigidBodyBuilder::fixed().translation(position).build();
         let body_handle = self.rigid_body_set.insert(body);
-        let collider = ColliderBuilder::cuboid(half_extents.x, half_extents.y, half_extents.z).build();
+        let collider =
+            ColliderBuilder::cuboid(half_extents.x, half_extents.y, half_extents.z).build();
         self.collider_set
             .insert_with_parent(collider, body_handle, &mut self.rigid_body_set);
     }
@@ -456,6 +523,10 @@ mod tests {
 
         fn target_state(&self, id: u32) -> &TargetState {
             self.targets.iter().find(|target| target.id == id).unwrap()
+        }
+
+        fn projectile_state(&self, id: u32) -> Option<&ProjectileState> {
+            self.projectiles.iter().find(|projectile| projectile.id == id)
         }
     }
 
@@ -522,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn hitscan_respects_visible_targets_and_cover() {
+    fn projectile_hits_visible_targets_and_respects_cover() {
         let mut world = GameWorld::new(1.0 / 60.0);
 
         let visible_origin = vector![8.0, 1.6, 8.0];
@@ -532,7 +603,7 @@ mod tests {
             visible_target,
         );
         world.set_player_pose_for_test(visible_origin, yaw, pitch);
-        let step = world.step(
+        world.step(
             1,
             &ClientInput {
                 fire_pressed: true,
@@ -541,18 +612,32 @@ mod tests {
                 ..ClientInput::default()
             },
         );
-        assert_eq!(step.recent_hits, vec![HitEvent { target_id: 3, score: 1 }]);
+
+        let mut last_hits = Vec::new();
+        for tick in 2..35 {
+            last_hits = world.step(tick, &ClientInput::default()).recent_hits;
+            if !last_hits.is_empty() {
+                break;
+            }
+        }
+
+        assert_eq!(last_hits, vec![HitEvent { target_id: 3, score: 1 }]);
         assert!(!world.target_state(3).alive);
 
         let mut occluded_world = GameWorld::new(1.0 / 60.0);
         let occluded_origin = vector![0.0, 1.6, 8.0];
-        let occluded_target = *occluded_world.rigid_body_set[occluded_world.target_state(2).body].translation();
+        let occluded_target =
+            *occluded_world.rigid_body_set[occluded_world.target_state(2).body].translation();
         let (yaw, pitch) = aim_from_to(
-            vector![occluded_origin.x, occluded_origin.y + PLAYER_EYE_HEIGHT, occluded_origin.z],
+            vector![
+                occluded_origin.x,
+                occluded_origin.y + PLAYER_EYE_HEIGHT,
+                occluded_origin.z
+            ],
             occluded_target,
         );
         occluded_world.set_player_pose_for_test(occluded_origin, yaw, pitch);
-        let step = occluded_world.step(
+        occluded_world.step(
             1,
             &ClientInput {
                 fire_pressed: true,
@@ -561,7 +646,11 @@ mod tests {
                 ..ClientInput::default()
             },
         );
-        assert!(step.recent_hits.is_empty());
+
+        for tick in 2..35 {
+            let step = occluded_world.step(tick, &ClientInput::default());
+            assert!(step.recent_hits.is_empty());
+        }
         assert!(occluded_world.target_state(2).alive);
     }
 
@@ -585,12 +674,37 @@ mod tests {
             },
         );
 
+        for tick in 2..35 {
+            if !world.step(tick, &ClientInput::default()).recent_hits.is_empty() {
+                break;
+            }
+        }
+
         let steps_to_respawn = (RESPAWN_SECONDS / world.fixed_dt) as u64 + 2;
-        for tick in 2..(2 + steps_to_respawn) {
+        for tick in 35..(35 + steps_to_respawn) {
             world.step(tick, &ClientInput::default());
         }
 
         assert!(world.target_state(1).alive);
+    }
+
+    #[test]
+    fn fired_projectile_appears_in_snapshots_until_collision() {
+        let mut world = GameWorld::new(1.0 / 60.0);
+        world.set_player_pose_for_test(vector![0.0, 1.6, 8.0], 0.0, 0.0);
+
+        world.step(
+            1,
+            &ClientInput {
+                fire_pressed: true,
+                ..ClientInput::default()
+            },
+        );
+
+        let snapshot = world.snapshot(1, 1, Vec::new());
+        assert_eq!(snapshot.projectiles.len(), 1);
+        assert_eq!(snapshot.projectiles[0].id, 1);
+        assert!(world.projectile_state(1).is_some());
     }
 
     #[test]

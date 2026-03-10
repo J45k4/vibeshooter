@@ -36,6 +36,11 @@ export type TargetSnapshot = {
   alive: boolean;
 };
 
+export type ProjectileSnapshot = {
+  id: number;
+  position: [number, number, number];
+};
+
 export type HitEvent = {
   targetId: number;
   score: number;
@@ -47,6 +52,7 @@ export type SnapshotMessage = {
   lastProcessedInput: number;
   player: PlayerSnapshot;
   targets: TargetSnapshot[];
+  projectiles: ProjectileSnapshot[];
   score: number;
   recentHits: HitEvent[];
   gameOver: boolean;
@@ -68,4 +74,3 @@ export type ServerMessage =
   | SnapshotMessage
   | GameOverMessage
   | ServerFullMessage;
-

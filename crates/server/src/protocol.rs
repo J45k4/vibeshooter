@@ -47,6 +47,7 @@ pub struct SnapshotMessage {
     pub last_processed_input: u64,
     pub player: PlayerSnapshot,
     pub targets: Vec<TargetSnapshot>,
+    pub projectiles: Vec<ProjectileSnapshot>,
     pub score: u32,
     pub recent_hits: Vec<HitEvent>,
     pub game_over: bool,
@@ -72,6 +73,13 @@ pub struct TargetSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectileSnapshot {
+    pub id: u32,
+    pub position: [f32; 3],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct HitEvent {
     pub target_id: u32,
     pub score: u32,
@@ -83,4 +91,3 @@ pub struct GameOverMessage {
     pub reason: String,
     pub score: u32,
 }
-
